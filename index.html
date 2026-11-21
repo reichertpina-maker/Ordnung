@@ -37,6 +37,7 @@ input,select{width:100%;font:inherit;padding:12px;border-radius:10px;border:1.5p
 .calc span{display:block;font-weight:400;color:var(--mute);font-size:14px}
 .actions{display:flex;gap:10px;margin-top:20px;justify-content:space-between;align-items:center}
 .actions .r{display:flex;gap:10px}
+.seg{display:flex;gap:6px;margin:0 0 16px}.seg button{flex:1;padding:9px 6px;font-size:14px;background:transparent;color:var(--acc);border:1.5px solid var(--acc)}.seg button[aria-pressed="true"]{background:var(--acc);color:var(--accink)}
 .err{color:var(--late);font-size:14px;margin-top:10px;min-height:18px}
 .link{background:none;color:var(--mute);font-weight:400;font-size:14px;padding:4px 0;text-decoration:underline}
 </style>
@@ -45,6 +46,7 @@ input,select{width:100%;font:inherit;padding:12px;border-radius:10px;border:1.5p
 <main>
   <h1>Ordnung</h1>
   <p class="sub" id="sub"></p>
+  <div class="seg" id="seg" role="group" aria-label="Sortierung"><button data-s="due">Fälligkeit</button><button data-s="name">Aufgabe A–Z</button><button data-s="freq">Häufigkeit</button></div>
   <div id="list"></div>
   <button class="link" id="logout" hidden>Abmelden</button>
 </main>
@@ -86,7 +88,9 @@ const SUPABASE_KEY='sb_publishable_MTjRQdi-qksa5v2PxGv--Q_5LfGd28P';
 // ================================================================
 const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
-let tasks=[],editId=null,me='';
+let tasks=[],editId=null,me='',sortBy='due';
+try{sortBy=localStorage.getItem('ordnung-sort')||'due'}catch(e){}
+const days=t=>t.n*(t.u==='d'?1:t.u==='w'?7:30);
 const pad=n=>String(n).padStart(2,'0');
 const iso=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const parse=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
@@ -113,7 +117,11 @@ function status(t){
 }
 function render(){
   const list=$('list');list.innerHTML='';
-  const rows=tasks.map(t=>({t,s:status(t)})).sort((a,b)=>a.s.key-b.s.key);
+  const cmp={due:(a,b)=>a.s.key-b.s.key,
+    name:(a,b)=>a.t.name.localeCompare(b.t.name,'de',{sensitivity:'base'}),
+    freq:(a,b)=>days(a.t)-days(b.t)||a.t.name.localeCompare(b.t.name,'de',{sensitivity:'base'})};
+  const rows=tasks.map(t=>({t,s:status(t)})).sort(cmp[sortBy]||cmp.due);
+  document.querySelectorAll('#seg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===sortBy));
   const open=rows.filter(r=>r.s.key<=0).length;
   $('sub').textContent=tasks.length?(open?`${open} ${open===1?'Aufgabe ist':'Aufgaben sind'} fällig`:'Alles erledigt'):'';
   if(!rows.length){list.innerHTML='<div class="empty">Noch keine Aufgaben.<br>Tippe auf „+ Aufgabe“.</div>';return}
@@ -159,12 +167,15 @@ $('save').onclick=async()=>{
   const rec={name,n:Math.max(1,parseInt($('f-n').value)||1),u:$('f-u').value,last:$('f-last').value||null};
   const cur=tasks.find(x=>x.id===editId);
   if(!cur||(cur.last||null)!==rec.last)rec.last_by=rec.last?me:null;
+  const dup=tasks.find(x=>x.id!==editId&&x.name.trim().toLowerCase()===name.toLowerCase());
+  if(dup&&!confirm('Es gibt schon eine Aufgabe „'+dup.name+'“. Trotzdem speichern?'))return;
   $('dlg').close();
   await run(cur?sb.from('tasks').update(rec).eq('id',editId):sb.from('tasks').insert(rec));
 };
 $('del').onclick=async()=>{
   if(confirm('Diese Aufgabe löschen?')){$('dlg').close();await run(sb.from('tasks').delete().eq('id',editId))}
 };
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{sortBy=b.dataset.s;try{localStorage.setItem('ordnung-sort',sortBy)}catch(e){}render()});
 // ---- Anmeldung ----
 $('l-go').onclick=async()=>{
   $('l-err').textContent='';
